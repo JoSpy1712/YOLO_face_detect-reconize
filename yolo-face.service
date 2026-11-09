@@ -1,0 +1,29 @@
+# Install this system unit only after configuring UART, MongoDB, and owner enrollment.
+[Unit]
+Description=Pi5 face recognition and Pico servo tracking
+# Wait for the system network-online target; database reachability still depends on the network.
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+# Run as the existing project owner, without requiring a desktop login.
+User=looklong
+WorkingDirectory=/home/looklong/yolo_face
+# Flush Python output into the journal immediately.
+Environment=PYTHONUNBUFFERED=1
+# Read persistent web-password and database settings from the project file.
+# A missing file is allowed; the application then uses its existing defaults.
+EnvironmentFile=-/home/looklong/yolo_face/.env
+# Use the project virtual environment and avoid an OpenCV GUI at boot.
+ExecStart=/home/looklong/yolo_face/.venv/bin/python /home/looklong/yolo_face/yolo_face.py --headless --uart-port /dev/ttyAMA0 --uart-baud 115200
+# Retry after a failed start, including when the camera is not ready yet.
+Restart=on-failure
+RestartSec=5
+# Let the Python program handle Ctrl+C-style shutdown and release the camera/UART.
+KillSignal=SIGINT
+TimeoutStopSec=20
+
+[Install]
+# Enabling this unit starts it automatically during normal system boot.
+WantedBy=multi-user.target

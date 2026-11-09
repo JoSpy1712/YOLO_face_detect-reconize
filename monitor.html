@@ -1,0 +1,156 @@
+<!-- Use HTML5 document parsing. -->
+<!doctype html>
+<!-- Declare English as the document language. -->
+<html lang="en">
+<!-- Begin metadata and stylesheet declarations. -->
+<head>
+<!-- Set UTF-8 text encoding and a responsive viewport for phones and desktops. -->
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Set the browser tab title. -->
+<title>Face Access Monitor</title>
+<!-- Begin the embedded CSS stylesheet. -->
+<style>
+/* Set the dark color scheme, default typeface, page background, and foreground text. */
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101820;color:#e8edf2}
+/* Constrain page width and arrange the header content with flexible spacing. */
+body{max-width:1100px;margin:auto;padding:24px}header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+/* Style headings and supporting text, then arrange the main area into two columns. */
+h1{font-size:1.6rem;margin-bottom:4px}p{color:#b7c5d0}main{display:grid;grid-template-columns:2fr 1fr;gap:20px;margin:24px 0}
+/* Style bordered panels and the responsive live-camera image. */
+.panel{background:#1a2733;border:1px solid #334553;border-radius:14px;padding:20px}.camera{width:100%;border-radius:8px;display:block;min-height:180px;background:#080e14}
+/* Style status badges and highlight recognized owners in green. */
+.badge{border-radius:30px;padding:8px 12px;background:#334553;font-weight:600}.authorized{background:#125e42}
+/* Style the full-width unlock button and its pointer behavior. */
+button{border:0;border-radius:8px;background:#35d49a;color:#082b20;font:700 1rem system-ui;padding:14px 24px;cursor:pointer;width:100%}
+/* Style disabled controls and the UART/action definition list. */
+button:disabled{background:#3b4b58;color:#a6b1b9;cursor:not-allowed}dt{color:#aebec9;margin-top:18px}dd{margin:4px 0;overflow-wrap:anywhere}
+/* Lay out capture thumbnails and style accessible full-size-image links and captions. */
+#events{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:16px}figure{margin:0;background:#1a2733;border-radius:10px;padding:12px}figure a{display:block;border-radius:6px;cursor:zoom-in}figure a:focus-visible{outline:3px solid #35d49a;outline-offset:4px}figure img{display:block;width:100%;border-radius:6px}figcaption{font-size:.85rem;padding-top:8px;overflow-wrap:anywhere}
+/* Reserve space for messages and switch the layout to one column on smaller screens. */
+#notice{min-height:2.5em}small{color:#b7c5d0}@media(max-width:700px){main{grid-template-columns:1fr}body{padding:16px}header{align-items:flex-start;flex-direction:column}}
+<!-- Finish the embedded stylesheet. -->
+</style>
+<!-- Finish metadata and stylesheet declarations. -->
+</head>
+<!-- Begin the visible monitoring interface. -->
+<body>
+<!-- Show the project title and a live recognition-status badge. -->
+<header><div><h1>Face Access Monitor</h1><p>Live camera · owner recognition · access history</p></div><span class="badge" id="status" role="status">CONNECTING</span></header>
+<!-- Begin the live camera and access-control panels. -->
+<main>
+<!-- Display the MJPEG stream supplied by the existing camera process. -->
+<section class="panel"><img class="camera" src="/video_feed" alt="Live camera with face recognition boxes"></section>
+<!-- Explain that an owner match is required before an unlock request. -->
+<section class="panel"><h2>Access control</h2><p>Wait for the owner to be recognized, then click Unlock or press <strong>K</strong>.</p>
+<!-- Create the initially disabled unlock button and an accessible result-message area. -->
+<button id="unlock" disabled>Unlock</button><p id="notice" role="status" aria-live="polite"></p>
+<!-- Display the UART operating state and the latest capture/unlock result. -->
+<dl><dt>UART</dt><dd id="uart">—</dd><dt>Last action</dt><dd id="action">—</dd></dl>
+<!-- Explain that database saving precedes UART submission. -->
+<small>Images are saved before sending the command. UART sent means submitted to the serial driver.</small></section>
+<!-- Finish the camera and access-control panels. -->
+</main>
+<!-- Create the capture-history heading, loading status, and thumbnail container. -->
+<h2>Recent captures</h2><p>Click a picture to open the full-size saved image in a new tab.</p><p id="history-status" role="status">Loading history…</p><div id="events"></div>
+<!-- Begin browser code for status polling, capture history, and unlock requests. -->
+<script>
+// Find the unlock button once so request and polling code share the same element.
+const button=document.getElementById('unlock');
+// Track whether an unlock HTTP request is already in progress.
+let sending=false;
+// Define the browser unlock-request procedure.
+async function unlock(){
+  // Ignore repeated requests while a request is pending or unlocking is unavailable.
+  if(sending || button.disabled)return;
+  // Mark the request as pending and disable the button immediately.
+  sending=true;button.disabled=true;
+  // Attempt the following network operation and report failures in the page.
+  try{
+    // POST an unlock request with the custom header required by the Flask route.
+    const response=await fetch('/api/unlock',{method:'POST',headers:{'X-Unlock-Request':'1'}});
+    // Decode the server JSON response.
+    const data=await response.json();
+    // Display the queued-request confirmation or error returned by the server.
+    document.getElementById('notice').textContent=data.message || data.error;
+  // Show a connection failure without automatically retrying an uncertain unlock.
+  }catch(error){document.getElementById('notice').textContent='Connection failed; check action status before retrying.';}
+  // Clear the pending-request flag whether the request succeeded or failed.
+  finally{sending=false;}
+// Finish the current JavaScript block.
+}
+// Connect button clicks to the unlock-request procedure.
+button.addEventListener('click',unlock);
+// Listen for the K keyboard shortcut on the dashboard.
+document.addEventListener('keydown',event=>{
+  // Accept an unmodified, non-repeating K keypress and request unlocking.
+  if(event.key.toLowerCase()==='k' && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey){event.preventDefault();unlock();}
+// Finish this event-listener callback.
+});
+// Define periodic polling of recognition, UART, and action status.
+async function status(){
+  // Attempt the following network operation and report failures in the page.
+  try{
+    // Fetch current status and reject unsuccessful HTTP responses.
+    const response=await fetch('/api/status');if(!response.ok)throw new Error();
+    // Decode the server JSON response.
+    const data=await response.json();
+    // Update the status badge text with the current recognition label.
+    const badge=document.getElementById('status');badge.textContent=data.status;
+    // Apply the authorized badge style only when the owner is recognized.
+    badge.classList.toggle('authorized',data.status==='AUTHORIZED');
+    // Enable the button only when no request is pending and the server allows unlocking.
+    button.disabled=sending || !data.can_unlock;
+    // Display the sender UART state reported by the server.
+    document.getElementById('uart').textContent=data.uart || '—';
+    // Display the latest capture/unlock result or its initial placeholder.
+    document.getElementById('action').textContent=data.message || 'No action yet';
+  // Disable unlocking and mark the dashboard offline if status polling fails.
+  }catch(error){button.disabled=true;document.getElementById('status').textContent='OFFLINE';}
+  // Schedule the next status poll after 400 milliseconds without overlapping recursive calls.
+  setTimeout(status,400);
+// Finish the current JavaScript block.
+}
+// Define periodic loading of the latest approved-capture thumbnails.
+async function history(){
+  // Attempt the following network operation and report failures in the page.
+  try{
+    // Fetch and decode capture-history JSON from MongoDB through the Flask route.
+    const response=await fetch('/api/events');const data=await response.json();
+    // Display the server-provided history error when the response is unsuccessful.
+    if(!response.ok)throw new Error(data.error || 'History unavailable');
+    // Clear old thumbnails before rebuilding the latest history view.
+    const container=document.getElementById('events');container.replaceChildren();
+    // Describe whether the latest capture list is empty or contains recent records.
+    document.getElementById('history-status').textContent=data.events.length?'Last 20 captures':'No captures yet.';
+    // Build one thumbnail card for each history record.
+    for(const item of data.events){
+      // Create the semantic container for a saved capture.
+      const figure=document.createElement('figure');
+      // Create a lazy-loaded JPEG thumbnail with a URL-encoded database identifier.
+      const img=document.createElement('img');img.loading='lazy';img.alt='Approved face capture';img.src='/api/events/'+encodeURIComponent(item.id)+'/image';
+      // Open the saved JPEG in a separate tab while preventing opener access.
+      const link=document.createElement('a');link.href=img.src;link.target='_blank';link.rel='noopener';
+      // Add a descriptive tooltip and an accessible label containing the capture time.
+      link.title='Open full-size saved image';link.setAttribute('aria-label','Open full-size capture from '+new Date(item.captured_at).toLocaleString());
+      // Place the thumbnail inside the full-size-image link.
+      link.append(img);
+      // Display capture time and UART submission status as text, avoiding HTML injection.
+      const caption=document.createElement('figcaption');caption.textContent=new Date(item.captured_at).toLocaleString()+' · UART: '+item.uart_status;
+      // Attach the completed image link and caption to the history grid.
+      figure.append(link,caption);container.append(figure);
+    // Finish the current JavaScript block.
+    }
+  // Show the capture-history failure in the dedicated status element.
+  }catch(error){document.getElementById('history-status').textContent=error.message;}
+  // Refresh capture history after ten seconds.
+  setTimeout(history,10000);
+// Finish the current JavaScript block.
+}
+// Start status polling and history loading when the page script runs.
+status();history();
+<!-- Finish the browser logic. -->
+</script>
+<!-- Finish the visible document. -->
+</body>
+<!-- Finish the HTML document. -->
+</html>
