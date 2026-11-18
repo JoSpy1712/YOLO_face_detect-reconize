@@ -11,6 +11,12 @@ Real-time face tracking, identity verification, and operator-approved access log
 
 ---
 
+<p align="center">
+<img src="https://raw.githubusercontent.com/JoSpy1712/YOLO_face_detect-reconize/52785bbc83946b4fb164642e92d0331fa2a9ed22/docs/prototype.png" alt="Assembled face-tracking prototype with a pan-and-tilt webcam, servo motors, voltage regulator, Raspberry Pi and Pico controller" width="1477" height="1108" />
+</p>
+
+<p align="center"><em>Assembled prototype: pan-and-tilt webcam and servo assembly (left), LM2596 step-down module (front), and Raspberry Pi with the Pico controller (right).</em></p>
+
 | Project | Details |
 | :--- | :--- |
 | Repository | YOLO_face_detect-reconize |
