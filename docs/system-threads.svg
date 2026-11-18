@@ -1,54 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080" role="img" aria-labelledby="title desc">
-<title id="title">Face tracking: threads, CPU scheduling and Pico control</title>
-<desc id="desc">Pi 5 uses capture, detection, recognition, HTTP and database worker threads. Linux schedules them across available cores with no fixed affinity. Pico uses one MicroPython loop and hardware PWM; core 1 is not explicitly used.</desc>
-<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8" fill="none" stroke="#486581" stroke-width="1.5"/></marker></defs>
-<rect width="1080" height="1080" rx="18" fill="#f4f7fc"/>
-<g font-family="Arial, sans-serif" fill="#102a43">
-<text x="40" y="43" font-size="27" font-weight="700">FACE RECOGNITION &amp; PAN-TILT TRACKING</text>
-<text x="40" y="71" font-size="16" fill="#486581">Execution architecture from the submitted Python and MicroPython source</text>
-<rect x="25" y="95" width="1030" height="720" rx="16" fill="#eaf2ff" stroke="#9cbce8"/>
-<text x="48" y="130" font-size="23" font-weight="700">Raspberry Pi 5 | one application process</text>
-<text x="48" y="157" font-size="16" fill="#334e68">Linux schedules runnable threads across available CPU cores; no thread-to-core pinning.</text>
-<g fill="#fff" stroke="#aac4e6" stroke-width="1.5">
-<rect x="48" y="183" width="290" height="110" rx="10"/>
-<rect x="395" y="183" width="290" height="110" rx="10"/>
-<rect x="742" y="183" width="290" height="110" rx="10"/>
-<rect x="48" y="337" width="984" height="64" rx="10" fill="#d6e7ff"/>
-<rect x="48" y="451" width="290" height="160" rx="10"/>
-<rect x="395" y="451" width="290" height="160" rx="10"/>
-<rect x="742" y="451" width="290" height="160" rx="10"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1080" viewBox="0 0 960 1080" role="img" aria-labelledby="title desc">
+<title id="title">Simple workflow and CPU scheduling</title><desc id="desc">Camera, detection, recognition, main, web and save work use separate software threads on Pi 5. Linux shares four CPU cores among runnable threads. Pico is a separate board receiving servo angles and approval commands.</desc>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 Z" fill="#486581"/></marker></defs>
+<rect width="960" height="1080" rx="16" fill="#f5f8fc"/>
+<g font-family="Arial,sans-serif" fill="#102a43">
+<text x="32" y="45" font-size="28" font-weight="700">HOW THE PROJECT WORKS</text>
+<text x="32" y="78" font-size="19">Threads divide the jobs. Linux chooses the CPU cores.</text>
+<text x="32" y="125" font-size="22" font-weight="700">1. WORKFLOW</text>
+<g fill="#e7f0ff" stroke="#acc6e8">
+<rect x="32" y="155" width="260" height="100" rx="12"/><rect x="350" y="155" width="260" height="100" rx="12"/><rect x="668" y="155" width="260" height="100" rx="12"/>
+<rect x="32" y="330" width="410" height="110" rx="12"/><rect x="518" y="330" width="410" height="110" rx="12"/>
+<rect x="518" y="510" width="410" height="110" rx="12"/>
 </g>
-<g font-size="19" font-weight="700">
-<text x="65" y="213">1. Capture thread</text><text x="412" y="213">2. YOLO detection</text><text x="759" y="213">3. Recognition thread</text>
-<text x="65" y="482">Main thread</text><text x="412" y="482">Web server + handlers</text><text x="759" y="482">Unlock worker (max 1)</text>
-</g>
-<g font-size="16" fill="#334e68">
-<text x="65" y="242">Read USB camera continuously</text><text x="65" y="267">Publish only the latest frame</text>
-<text x="412" y="242">Infer on a new frame ID</text><text x="412" y="267">Publish boxes + source image</text>
-<text x="759" y="242">One face: YuNet + SFace</text><text x="759" y="267">Enrollment / identity status</text>
-<text x="65" y="510">Track face; send UART state</text><text x="65" y="536">Desktop UI + JPEG publication</text><text x="65" y="562">Recheck approval conditions</text><text x="65" y="588">Poll Future without waiting</text>
-<text x="412" y="510">Serve MJPEG and status</text><text x="412" y="536">Queue operator Unlock request</text><text x="412" y="562">Condition + queue(maxsize=1)</text><text x="412" y="588">Disabled by --no-web</text>
-<text x="759" y="510">MongoDB: JPEG + timestamp</text><text x="759" y="536">Then transmit APPROVED</text><text x="759" y="562">Save failure: no approval</text><text x="759" y="588">UART writes share a lock</text>
-</g>
-<text x="69" y="365" font-size="18" font-weight="700">Shared snapshots protected by state_lock</text>
-<text x="69" y="388" font-size="15" fill="#334e68">Latest frame / detection / authorization; frame IDs avoid reprocessing the same image.</text>
-<g fill="none" stroke="#486581" stroke-width="2" marker-end="url(#arrow)">
-<path d="M338 237 H390"/><path d="M685 237 H737"/>
-<path d="M193 293 V331"/><path d="M540 293 V331"/><path d="M887 293 V331"/>
-<path d="M193 401 V445"/><path d="M540 451 V407"/><path d="M887 401 V445"/>
-</g>
-<text x="67" y="640" font-size="15" fill="#334e68">Web request queue → main-thread recheck → single unlock worker. Browser handlers do not grant approval.</text>
-<rect x="48" y="662" width="984" height="124" rx="10" fill="#fff" stroke="#aac4e6"/>
-<text x="67" y="690" font-size="18" font-weight="700">CPU scheduling and native inference workers</text>
-<text x="67" y="717" font-size="16">N = CPUs allowed by the process affinity mask (fallback: os.cpu_count() or 1).</text>
-<text x="67" y="743" font-size="16">OpenCV threads = N | PyTorch intra-op threads = N | PyTorch inter-op threads = 1.</text>
-<text x="67" y="769" font-size="16">These are library thread settings, not reserved cores or guaranteed simultaneous execution.</text>
-<path d="M193 815 V849" fill="none" stroke="#486581" stroke-width="2" marker-end="url(#arrow)"/>
-<text x="214" y="838" font-size="16" font-weight="700">UART 115200 baud | STATE at most ~20 Hz + APPROVED</text>
-<rect x="25" y="860" width="1030" height="190" rx="16" fill="#e7f5ed" stroke="#9bc9af"/>
-<text x="48" y="895" font-size="23" font-weight="700">Raspberry Pi Pico | one MicroPython loop on core 0</text>
-<text x="48" y="926" font-size="17">UART0 GP0 TX / GP1 RX → validate packet → update GP2 pan + GP3 tilt</text>
-<text x="48" y="954" font-size="17">Hardware PWM at 50 Hz | approval LED timeout | diagnostics | sleep_ms(2)</text>
-<text x="48" y="982" font-size="17">Core 1: no application task is explicitly started (_thread is not used).</text>
-<text x="48" y="1019" font-size="16" fill="#334e68">PWM peripherals maintain pulses while the loop handles UART; this is not a second CPU thread.</text>
+<rect x="32" y="510" width="410" height="110" rx="12" fill="#e5f5eb" stroke="#9bc9af"/>
+<g font-size="22" font-weight="700"><text x="50" y="188">Capture thread</text><text x="368" y="188">Detection thread</text><text x="686" y="188">Recognition thread</text><text x="50" y="364">Main thread</text><text x="536" y="364">Web threads</text><text x="536" y="544">Save worker</text><text x="50" y="544">Pico (separate board)</text></g>
+<g font-size="19"><text x="50" y="219">Read the camera</text><text x="368" y="219">YOLO finds faces</text><text x="686" y="219">YuNet + SFace</text><text x="686" y="244">Check the owner</text>
+<text x="50" y="395">Track face + update display</text><text x="50" y="423">Check Unlock conditions</text><text x="536" y="395">Show live images</text><text x="536" y="423">Receive the Unlock click</text>
+<text x="536" y="576">Save image to MongoDB</text><text x="536" y="604">Then send APPROVED</text><text x="50" y="576">Receive UART commands</text><text x="50" y="604">Control servos + approval LED</text></g>
+<g fill="none" stroke="#486581" stroke-width="2.5" marker-end="url(#a)"><path d="M292 205 H344"/><path d="M610 205 H662"/><path d="M480 255 V289 H237 V324"/><path d="M798 255 V305 H410 V324"/><path d="M518 385 H448"/><path d="M237 440 V504"/><path d="M442 420 H480 V479 H723 V504"/><path d="M518 570 H448"/></g>
+<g font-size="16" fill="#334e68"><text x="251" y="282">Face positions</text><text x="644" y="298">Owner status</text><text x="244" y="485">Servo angles</text><text x="529" y="469">Allowed request</text></g>
+<text x="32" y="657" font-size="18">Blue boxes: Pi 5 software threads. Green box: Pico runs its own single loop.</text>
+<path d="M32 688 H928" stroke="#c8d5e4"/>
+<text x="32" y="731" font-size="22" font-weight="700">2. HOW PI 5 RUNS THE THREADS ABOVE</text>
+<text x="32" y="765" font-size="19">Capture / Detection / Recognition / Main / Web / Save</text>
+<rect x="150" y="791" width="660" height="69" rx="12" fill="#dbeafe" stroke="#acc6e8"/>
+<text x="480" y="821" text-anchor="middle" font-size="23" font-weight="700">Linux chooses who runs next</text><text x="480" y="846" text-anchor="middle" font-size="18">Ready threads get CPU time; waiting threads give way.</text>
+<g fill="none" stroke="#486581" stroke-width="2.5"><path d="M480 860 V888 H140 V910 M480 888 H820 V910 M367 888 V910 M593 888 V910"/></g>
+<g fill="#fff" stroke="#acc6e8"><rect x="50" y="910" width="180" height="60" rx="10"/><rect x="277" y="910" width="180" height="60" rx="10"/><rect x="503" y="910" width="180" height="60" rx="10"/><rect x="730" y="910" width="180" height="60" rx="10"/></g>
+<g text-anchor="middle" font-size="23" font-weight="700"><text x="140" y="948">Core 0</text><text x="367" y="948">Core 1</text><text x="593" y="948">Core 2</text><text x="820" y="948">Core 3</text></g>
+<text x="480" y="1008" text-anchor="middle" font-size="21" font-weight="700">No job has its own fixed core.</text><text x="480" y="1041" text-anchor="middle" font-size="18">OpenCV and PyTorch can also create calculation threads.</text>
 </g></svg>
