@@ -89,12 +89,12 @@ The project integrates established techniques into a working prototype; it does 
 ### 3.1 Execution diagram
 
 <p align="center">
-<img src="https://raw.githubusercontent.com/JoSpy1712/YOLO_face_detect-reconize/849b72b7645c59a46d515e67bd7140469a03b563/docs/system-threads.svg" alt="Pi 5 thread pipeline, Linux CPU scheduling, shared locks, approval worker and Pico single-loop hardware PWM" width="1080" height="1080" />
+<img src="https://raw.githubusercontent.com/JoSpy1712/YOLO_face_detect-reconize/2458608d71e379fc07a15a3e2fe7a2468c345dbe/docs/system-threads.svg" alt="Simple workflow: camera, face detection, owner check, web approval, database save and Pico control; Linux shares four Pi 5 cores among the threads" width="960" height="1080" />
 </p>
 
 [Open the full-size execution diagram](docs/system-threads.svg) · [Wiring and mechanical diagram (PDF)](Wiring%20and%20Mechanical%20Diagram.pdf)
 
-The diagram is a static SVG with a fixed aspect ratio. It does not need an embedded Mermaid renderer to resize the page after loading.
+**Top: what each thread does and where its results go. Bottom: Linux shares the four Pi 5 cores among these threads.** No thread is tied to a fixed core. Pico is a separate board that receives the commands and controls the servos.
 
 ### 3.2 Why use multiple threads?
 
