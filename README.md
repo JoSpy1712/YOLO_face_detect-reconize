@@ -83,7 +83,7 @@ The project integrates established techniques into a working prototype; it does 
 ### 3.1 Execution diagram
 
 <p align="center">
-<img src="docs/system-threads.svg" alt="Pi 5 thread pipeline, Linux CPU scheduling, shared locks, approval worker and Pico single-loop hardware PWM" width="1080" height="1080" />
+<img src="https://raw.githubusercontent.com/JoSpy1712/YOLO_face_detect-reconize/849b72b7645c59a46d515e67bd7140469a03b563/docs/system-threads.svg" alt="Pi 5 thread pipeline, Linux CPU scheduling, shared locks, approval worker and Pico single-loop hardware PWM" width="1080" height="1080" />
 </p>
 
 [Open the full-size execution diagram](docs/system-threads.svg) · [Wiring and mechanical diagram (PDF)](Wiring%20and%20Mechanical%20Diagram.pdf)
