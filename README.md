@@ -29,7 +29,7 @@ Real-time face tracking, identity verification, and operator-approved access log
 3. [System design, multithreading and CPU cores](#system-design)
 4. [Hardware](#hardware)
 5. [Repository guide](#repository-guide)
-6. [Installation and operation](#installation)
+6. [Installation and operation](#installation) — [face enrollment](#face-enrollment)
 7. [Verification and current scope](#verification)
 8. [References](#references)
 
@@ -132,7 +132,7 @@ torch.set_num_interop_threads(1)
 
 On a Pi 5 process permitted to use all four cores, N is normally 4. This configuration does not reserve four cores for each library or guarantee that every stage executes simultaneously. With a conventional GIL-enabled CPython build, Python bytecode is constrained by the GIL; native inference operations can have their own parallel execution. See the [Python threading documentation](https://docs.python.org/3/library/threading.html#gil-and-performance-considerations).
 
-The benefit is concurrent pipeline progress and overlap with I/O. Actual throughput and CPU load must be measured on the Pi. Both libraries are configured with N workers, and the recognition loop currently retries immediately when no new detection is available; CPU utilization should be evaluated rather than assuming one busy thread per core.
+The benefit is concurrent pipeline progress and overlap with I/O. Actual throughput and CPU load must be measured on the Pi. Both libraries are configured with N workers. The recognition loop waits up to 10 ms for a registration/cancel command on each iteration before checking for a new detection; CPU utilization should be measured rather than assuming one busy thread per core.
 
 ### 3.5 Shared state and approval conditions
 
@@ -291,7 +291,79 @@ python yolo_face.py --uart-port /dev/ttyAMA0 --uart-baud 115200
 
 Open the Pi's IP address on port 5000 in a browser. The dashboard username is admin; use the configured or generated password reported by the application. Complete owner enrollment before using approval.
 
-### 6.6 Pico and startup service
+<a name="face-enrollment"></a>
+
+### 6.6 Enroll and save the owner's face
+
+The program stores **one owner's reference image set**. Enrollment creates SFace features for matching; it does not retrain YOLO, YuNet or SFace, and it does not create separate named accounts for multiple people.
+
+#### Start enrollment from the Pi desktop
+
+1. Run the application in a graphical desktop session **without --headless**, using the command in section 6.5. Keep the required models and configured MongoDB connection available. If the startup service already owns the camera, stop that instance before starting the interactive application.
+2. Click the **YOLO Face Recognition** camera window so it receives keyboard input. Use the English keyboard layout.
+3. Keep exactly one face in view, then press lowercase **r** once. The display changes to REGISTERING 0/60. No Register button or enrollment API is implemented in the current web dashboard.
+4. Let the system collect valid face images automatically. Follow the on-screen guidance below; there is no shutter key for each image.
+5. Wait for the terminal message **Registration complete: 60 face samples saved in .../owner_faces**. The status initially returns to UNKNOWN, then can become AUTHORIZED after two consecutive accepted matches.
+
+| Current sample count | On-screen guidance | What to do |
+| :--- | :--- | :--- |
+| 0–19 | FACE FORWARD | Face the camera clearly |
+| 20–39 | TURN LEFT/RIGHT | Slowly vary the face angle while remaining detectable |
+| 40–59 | VARY LIGHTING | Vary the lighting while keeping the face visible |
+| 60 saved samples | Registration complete (terminal) | Enrollment finishes and normal recognition resumes |
+
+Collection continues automatically at counts 20 and 40. The terminal prompts at these points do not pause capture or wait for a confirmation key. Completion time depends on the number of usable detections, not a fixed countdown.
+
+#### Which images are accepted?
+
+The recognition thread processes a new detection ID and requires exactly one YOLO face box. It crops that face, asks YuNet for landmarks, aligns it for SFace, and normalizes the extracted feature vector. A crop smaller than 20 pixels in either dimension, missing landmarks, or an invalid embedding is rejected. The sample counter increases only when cv2.imwrite successfully saves the cropped JPEG.
+
+While collecting, multiple/no faces produce the ONE FACE ONLY guidance. An embedding failure can show UNKNOWN - FACE ALIGNMENT FAILED. Adjust the face position and continue; a rejected frame does not count toward the 60 samples. Unlock is disabled during enrollment.
+
+#### Where the reference data is saved
+
+Paths are relative to the folder containing yolo_face.py, not the terminal's current directory:
+
+~~~text
+project/
+├── yolo_face.py
+├── .owner_faces_pending/      temporary set while collecting
+│   ├── owner_000.jpg
+│   └── ...
+└── owner_faces/               completed owner reference set
+    ├── owner_000.jpg
+    ├── owner_001.jpg
+    ├── ...
+    └── owner_059.jpg
+~~~
+
+During collection, the cropped source face images are written into .owner_faces_pending. Once 60 images have been saved, the code removes any existing owner_faces directory and moves the pending directory into its place. **Completing enrollment again replaces the previous owner image set.** This is one owner's replacement set, not an additional user profile.
+
+The SFace embeddings are held in memory. On the next launch, load_owner_embeddings reads the JPEGs in owner_faces and recomputes their features; there is no separately saved embedding file in this implementation. At least one valid loaded embedding is needed for the program to treat the owner as registered, although normal enrollment collects 60 images.
+
+#### Cancel, enroll again and run headless
+
+| Key / operation | Actual behavior |
+| :--- | :--- |
+| lowercase r | Start a new enrollment when enrollment is inactive |
+| lowercase q during enrollment | Cancel collection, remove the temporary pending folder and keep the previous completed registration |
+| lowercase q outside enrollment | Exit the interactive application |
+| k or K | Request Unlock; does not add enrollment samples |
+| Web Unlock button | Request an approval capture; does not register a face |
+| --headless | Reuse saved owner_faces; no desktop key input is available for starting enrollment |
+
+The overlay labels use uppercase letters, but the code checks lowercase r and q. Enroll interactively first, then exit and restart with --headless or the configured startup service. To replace the registered owner, repeat enrollment and complete a new set of 60 samples. The previous set remains in use if the new collection is cancelled before completion.
+
+#### Enrollment images versus approval captures
+
+| Data | Trigger | Storage | Purpose |
+| :--- | :--- | :--- | :--- |
+| Owner reference crops | Press r, then automatic collection | Local owner_faces/owner_000.jpg through owner_059.jpg | Rebuild SFace reference features for identity matching |
+| Approved capture | Fresh authorized match plus operator Unlock or k/K | MongoDB face_access.unlock_events | Store the authorized source-frame JPEG, UTC timestamp and UART submission status |
+
+Approval captures are not added to owner_faces and do not automatically update the registered identity. The dashboard's Recent captures section displays the latest 20 approval events; an empty history does not mean that enrollment images are missing.
+
+### 6.7 Pico and startup service
 
 Install the separately supplied Pico main.py on the board with compatible MicroPython firmware. The receiver validates UART commands, updates hardware PWM and shows approval status; it does not start a second-core application thread.
 
