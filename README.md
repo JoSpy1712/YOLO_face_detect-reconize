@@ -1,79 +1,245 @@
-                                                                                  YOLO_face_detect-reconize
+<div align="center">
 
-# The rational of the project
-Today, security is an important concern for organizations. Advances in AI-based image processing have made facial recognition increasingly useful for access control. However, some systems use fixed cameras and do not actively follow a person as they move.This project combines facial recognition with a two-axis pan-and-tilt camera system. It follows a person’s face as they move within the camera’s tracking range, keeping the face near the center of the image. A web dashboard allows an operator to view the live camera feed and monitor recognition status in real time. Once the system verifies the person as an authorized user, the operator can press the Unlock button to approve access.Before sending the approval command, the system saves the person’s image and a timestamp in a database. These records provide a history of access approvals for later review.
+# Face Recognition & Pan–Tilt Tracking
+### Raspberry Pi 5 · Raspberry Pi Pico · YOLO · YuNet · SFace
 
-# Literature Review
-Previous research provides a foundation for combining facial recognition, access control, and automatic camera tracking. This project draws on five related studies to develop a system that verifies an authorized user, follows a detected face, and records access approvals.
-Redmon et al. (2016) introduced YOLO, a unified object detection approach that predicts bounding boxes and class probabilities using a single neural network. This approach supports real-time detection and provides the foundation for locating targets within camera images. In this project, a YOLO-based face detector identifies the face position used by the pan-and-tilt tracking controller [1].
-Zhong et al. (2021) proposed SFace, a facial recognition method designed to improve feature discrimination while reducing overfitting caused by imperfect training data. This research supports the identity-verification component of the project. A pretrained SFace model extracts feature vectors from aligned face images, which are compared with the enrolled owner’s features using cosine similarity [2].
-Wu, Peng, and Yu (2023) developed YuNet, a lightweight face detector designed for edge devices with limited computing resources. Their work emphasizes balancing detection accuracy, model size, and processing speed. In this project, YuNet identifies facial landmarks within the face region detected by YOLO. These landmarks support face alignment before SFace extracts the recognition features [3].
-Elnozahy, Pari, and Liang (2025) developed a Raspberry Pi-based facial recognition door lock system using computer vision and electronic lock-control hardware. Their research demonstrates the practical integration of facial recognition with access control. The present project addresses a related application, while incorporating operator approval through a web dashboard and recording the approved image with a timestamp in MongoDB [4].
-Doloiu et al. (2025) presented a pan-and-tilt face-tracking system that combines YOLO-based detection with PID control. Their system calculates the difference between the detected face position and the image center, then adjusts the servo motors to reduce this error. This principle is closely related to the tracking function of the present project. However, the current implementation uses a simpler image-error controller with a dead zone, bounded angular corrections, and angle limits rather than a complete PID controller [5].
-Based on these studies, this project integrates face detection, identity verification, two-axis camera tracking, live web monitoring, and approval recording. The Raspberry Pi 5 performs image processing and application management, while the Raspberry Pi Pico receives angle commands through UART and generates the servo PWM signals. The project therefore focuses on integrating established techniques into a working prototype rather than introducing a new recognition algorithm.
-References
-[1] Redmon, J., Divvala, S., Girshick, R., and Farhadi, A. (2016). “You Only Look Once: Unified, Real-Time Object Detection.” Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition. https://arxiv.org/abs/1506.02640
-[2] Zhong, Y., Deng, W., Hu, J., Zhao, D., Li, X., and Wen, D. (2021). “SFace: Sigmoid-Constrained Hypersphere Loss for Robust Face Recognition.” IEEE Transactions on Image Processing, 30, 2587–2598. https://doi.org/10.1109/TIP.2020.3048632
-[3] Wu, W., Peng, H., and Yu, S. (2023). “YuNet: A Tiny Millisecond-level Face Detector.” Machine Intelligence Research, 20, 656–665. https://doi.org/10.1007/s11633-023-1423-y
-[4] Elnozahy, S. S. F. A., Pari, S. C., and Liang, L. C. (2025). “Raspberry Pi-Based Face Recognition Door Lock System.” IoT, 6(2), 31. https://doi.org/10.3390/iot6020031
-[5] Doloiu, M. D., et al. (2025). “Modeling and Control of a Pan–Tilt Servo System for Face Tracking Using Deep Learning and PID.” Engineering Proceedings, 113(1), 75. https://doi.org/10.3390/engproc2025113075
+Real-time face tracking, identity verification, and operator-approved access logging.
 
+[Overview](#1-project-overview) · [System design](#3-system-design) · [Hardware](#4-hardware) · [Setup](#6-installation-and-operation) · [References](#8-references)
 
-                                <img width="953" height="418" alt="image" src="https://github.com/user-attachments/assets/a3fbbb00-85d5-4185-9696-8c613f89e815" />
+</div>
 
-                                                                                  LM2596 Spectification
+---
 
-                                 <img width="642" height="686" alt="image" src="https://github.com/user-attachments/assets/68b2d266-aa94-48c4-b260-f1cc18cf9ac1" />
+| Project | Details |
+| :--- | :--- |
+| Repository | YOLO_face_detect-reconize |
+| Main processor | Raspberry Pi 5 |
+| Servo controller | Raspberry Pi Pico via UART, 115200 baud |
+| Vision pipeline | YOLO face detection → YuNet landmarks → SFace recognition |
+| Interface | Live web dashboard with operator approval |
+| Records | Approved capture image and timestamp in MongoDB |
 
-                                                                                   MG996R Specification
+## Contents
 
-                                <img width="519" height="668" alt="image" src="https://github.com/user-attachments/assets/9b6fdc00-ed37-44d7-986c-28aab5d2af84" />
-                                <img width="553" height="510" alt="image" src="https://github.com/user-attachments/assets/da5e8d31-a156-4c5f-ad02-05b728b73fa6" />
+1. [Project overview](#1-project-overview)
+2. [Theory and related work](#2-theory-and-related-work)
+3. [System design](#3-system-design)
+4. [Hardware](#4-hardware)
+5. [Repository guide](#5-repository-guide)
+6. [Installation and operation](#6-installation-and-operation)
+7. [Verification and current scope](#7-verification-and-current-scope)
+8. [References](#8-references)
 
-                                                                                    EMEET C950 1080P
-                                                                                       
-                                 <img width="643" height="450" alt="image" src="https://github.com/user-attachments/assets/71f3bf4e-c307-459a-b102-225db2a6b395" />
-                                <img width="600" height="496" alt="image" src="https://github.com/user-attachments/assets/8be02f58-b4d7-4626-a13d-01e3e7845b80" />
+## 1. Project overview
 
-                                       
+### Rationale
 
+Security systems benefit from identifying authorized users and maintaining a record of access approvals. A fixed camera may lose a useful view when a person moves. This project combines facial recognition with a two-axis pan-and-tilt mechanism to keep a detected face near the center of the camera frame.
 
+The Raspberry Pi 5 processes camera images and provides a live web dashboard. Once an enrolled user is recognized, an operator can press **Unlock** to approve access. The application saves a capture image and timestamp in MongoDB before sending the approval command to the Pico.
 
+### Objectives
 
-# Pi5 sender : face recognition and servo tracking
+- Detect faces and follow a selected target using pan and tilt servos.
+- Verify the enrolled user's identity using aligned face features.
+- Display the live camera feed and recognition status on a web dashboard.
+- Record operator-approved events before transmitting approval over UART.
+- Separate image processing on the Pi 5 from servo PWM generation on the Pico.
 
+## 2. Theory and related work
 
-# Role of Each code in Pi5
--  yolo_face.py : main code for control all system.
--  servo_tracking.py : making face-center pan/tilt commands, 0 to 180 degrees.
--  uart_commands.py : writing Uart command, Angle messages, and APPROVED messages.
--  unlock_action.py : save the approval JPEG before send APPROVED massage.
--  mongodb_config.py : load the private MongoDB URI from  .env file.
--  web_server.py and web_state.py : authenticated dashboard and thread-safe state.
--  monitor.html : HTML, CSS, and JavaScript for web dashboard.
+### Face detection and recognition
 
-# YOLO package 'model.pt'
+**YOLO** provides the face locations used by the tracking controller. Redmon et al. introduced the unified detection approach that underpins the YOLO family [1]. **YuNet** supplies facial landmarks for alignment within the detected face region [3]. **SFace** extracts feature vectors from aligned faces, which are compared with enrolled features using cosine similarity [2].
 
-Install the 'ultralytics' Python package in the project virtual environment; it uses PyTorch
-to load . the project face-detector weights from 'model.pt' beside 'yolo_face.py'.
+### Pan-and-tilt tracking
 
-# Yunet and Sface
+The controller calculates the displacement between the face center and image center. It applies a dead zone, bounded angular corrections, and limits from 0° to 180°. This implementation uses image-error feedback rather than a complete PID controller.
 
-Install 'YuNet' and 'Sface' model. YuNet detects facial landmarks used to align the cropped face. 
-SFace extracts facial feature vectors, which are compared with the enrolled owner's features to verify identity.
+### Related studies
 
-# Enable Pi5 header UART before connect to Pico
+| Study | Contribution | Connection to this project |
+| :--- | :--- | :--- |
+| Redmon et al. (2016) [1] | Unified real-time object detection | Basis of YOLO-based face localization |
+| Zhong et al. (2021) [2] | SFace recognition features | Identity verification with cosine similarity |
+| Wu, Peng & Yu (2023) [3] | Lightweight YuNet face detection | Facial landmarks and alignment |
+| Elnozahy et al. (2025) [4] | Raspberry Pi facial-recognition door lock | Related access-control integration |
+| Doloiu et al. (2025) [5] | YOLO and PID pan-and-tilt tracking | Related tracking architecture; this project uses simpler feedback |
 
-If header UART0 is not already enabled, edit with 'sudo nano /boot/firmware/config.txt' and add the code 'dtoverlay=uart0-pi5' after [all] 
-Connect the configured Pi5 GPIO14 TX (physical pin 8) to Pico GP1 RX (physical pin 2), Pi5 GPIO15 RX (physical pin 10) to Pico GP0 TX (physical pin 1). use 115200 baudrate.
-and connect grounds.
+The project integrates established techniques into a working prototype; it does not introduce a new recognition algorithm.
 
-# Quick start on Pi5
-- install .venv (virtual environment)
-- install python pipe : open cv , py serial
-- install pytorch,yunet,sface
-- open uart --uart-port /dev/ttyAMA0 --uart-baud 115200
+## 3. System design
 
-# Pi PICO : generate pwm signal to servo and action when approve
+```mermaid
+flowchart TD
+    Camera[USB camera] --> Pi[Raspberry Pi 5]
+    Pi --> YOLO[YOLO face detection]
+    YOLO --> Tracking[Face-center tracking]
+    YOLO --> YuNet[YuNet landmarks and alignment]
+    YuNet --> SFace[SFace identity verification]
+    Pi --> Dashboard[Live web dashboard]
+    SFace --> Dashboard
+    Dashboard --> Approval[Operator approval]
+    Approval --> Mongo[(MongoDB: image and timestamp)]
+    Mongo --> Command[Approval command after successful save]
+    Tracking --> UART[UART: 115200 baud]
+    Command --> UART
+    UART --> Pico[Raspberry Pi Pico]
+    Pico --> Servos[Pan and tilt servo PWM]
+    Pico --> LED[Approval indication]
+```
 
-# main.py : recieve uart massage then command servo tilt,pan and led on board on when approve.
+**Approval sequence:** fresh owner match → operator presses Unlock → image is saved → approval command is transmitted.
+
+[View wiring and mechanical diagram (PDF)](Wiring%20and%20Mechanical%20Diagram.pdf)
+
+## 4. Hardware
+
+| Component | Role |
+| :--- | :--- |
+| Raspberry Pi 5 | Vision processing, dashboard, database communication |
+| Raspberry Pi Pico | UART receiver and servo PWM generation |
+| EMEET C950 1080P camera | Camera input |
+| MG996R servos | Pan-and-tilt movement |
+| LM2596 step-down module | Voltage regulation for the hardware supply |
+| Pan-and-tilt assembly and wiring | Camera mounting and electrical connections |
+
+### Hardware overview
+
+<p align="center">
+<img src="https://github.com/user-attachments/assets/a3fbbb00-85d5-4185-9696-8c613f89e815" alt="Project hardware reference" width="850" />
+</p>
+
+### LM2596 specification
+
+<p align="center">
+<img src="https://github.com/user-attachments/assets/68b2d266-aa94-48c4-b260-f1cc18cf9ac1" alt="LM2596 specification" width="520" />
+</p>
+
+### MG996R specification
+
+<p align="center">
+<img src="https://github.com/user-attachments/assets/9b6fdc00-ed37-44d7-986c-28aab5d2af84" alt="MG996R servo specification" width="430" />
+<img src="https://github.com/user-attachments/assets/da5e8d31-a156-4c5f-ad02-05b728b73fa6" alt="MG996R supporting reference" width="430" />
+</p>
+
+### EMEET C950 1080P
+
+<p align="center">
+<img src="https://github.com/user-attachments/assets/71f3bf4e-c307-459a-b102-225db2a6b395" alt="EMEET C950 camera reference" width="430" />
+<img src="https://github.com/user-attachments/assets/8be02f58-b4d7-4626-a13d-01e3e7845b80" alt="EMEET C950 supporting reference" width="430" />
+</p>
+
+## 5. Repository guide
+
+| File | Purpose |
+| :--- | :--- |
+| [yolo_face.py](yolo_face.py) | Main application, camera processing, enrollment and recognition |
+| [servo_tracking.py](servo_tracking.py) | Face-center tracking and bounded pan/tilt commands |
+| [uart_commands.py](uart_commands.py) | Serial communication, angle state and APPROVED messages |
+| [unlock_action.py](unlock_action.py) | Save the approved image before sending approval |
+| [mongodb_config.py](mongodb_config.py) | Load the MongoDB URI from the local environment |
+| [web_server.py](web_server.py) | Authenticated dashboard server |
+| [web_state.py](web_state.py) | Thread-safe monitoring state |
+| [monitor.html](monitor.html) | Dashboard HTML, CSS and JavaScript |
+| [yolo-face.service](yolo-face.service) | Example systemd service for startup on boot |
+| [model.pt](model.pt) | YOLO face-detector weights |
+| [face_detection_yunet_2023mar.onnx](face_detection_yunet_2023mar.onnx) | YuNet model |
+| [Wiring and Mechanical Diagram.pdf](Wiring%20and%20Mechanical%20Diagram.pdf) | Wiring and mechanical documentation |
+
+**Additional files required:** the SFace model, local configuration and owner enrollment data are not included in the repository. The Pico receiver firmware described as main.py must also be supplied separately.
+
+## 6. Installation and operation
+
+### 6.1 Prepare the Raspberry Pi 5
+
+Create a project virtual environment and install the Python dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install ultralytics opencv-python numpy pyserial flask pymongo
+```
+
+The application also imports PyTorch, which is a dependency of Ultralytics. Use package builds compatible with the Pi's operating system and Python version.
+
+### 6.2 Prepare the models
+
+Keep the following model files beside yolo_face.py:
+
+- model.pt — included YOLO face-detector weights.
+- face_detection_yunet_2023mar.onnx — included YuNet model.
+- face_recognition_sface_2021dec.onnx — download separately from [OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface).
+
+### 6.3 Configure UART
+
+If header UART0 is not enabled, edit /boot/firmware/config.txt and add the following under [all], then reboot:
+
+```ini
+dtoverlay=uart0-pi5
+```
+
+| Raspberry Pi 5 | Raspberry Pi Pico |
+| :--- | :--- |
+| GPIO14 TX — physical pin 8 | GP1 RX — physical pin 2 |
+| GPIO15 RX — physical pin 10 | GP0 TX — physical pin 1 |
+| GND | GND |
+
+Set both devices to **115200 baud**. Follow the wiring PDF for power and servo connections.
+
+### 6.4 Configure the database and dashboard
+
+The application reads MONGODB_URI from the environment or a neighboring .env file. Its default database and collection are face_access and unlock_events.
+
+```dotenv
+MONGODB_URI=mongodb://localhost:27017
+```
+
+To choose a persistent dashboard password for an interactive run, export FACE_WEB_PASSWORD in the shell before launching. If it is not provided, the application generates a password at startup. Keep private settings in local configuration.
+
+### 6.5 Run the application
+
+```bash
+source .venv/bin/activate
+python yolo_face.py --uart-port /dev/ttyAMA0 --uart-baud 115200
+```
+
+| Option | Purpose |
+| :--- | :--- |
+| --no-uart | Run recognition without serial commands |
+| --headless | Run without the desktop camera window |
+| --no-web | Disable the dashboard |
+| --web-port 5000 | Set the dashboard port; default is 5000 |
+| --pan-direction -1 | Set horizontal tracking direction to -1 or 1 |
+| --tilt-direction 1 | Set vertical tracking direction to -1 or 1 |
+
+Open the Pi's IP address on port 5000 in a browser and authenticate with the dashboard credentials reported by the application. Complete owner enrollment before using approval.
+
+### 6.6 Pico and startup service
+
+The Pico receiver must interpret the UART commands, generate servo PWM and show approval status. Its firmware is not currently included in this repository.
+
+For automatic startup, adapt User, WorkingDirectory, EnvironmentFile and ExecStart in [yolo-face.service](yolo-face.service) to the actual Pi account and project directory before installing the unit. Configure UART, MongoDB and enrollment first.
+
+## 7. Verification and current scope
+
+The following checklist describes checks to perform on the assembled hardware; it is not a report of measured test results.
+
+- Confirm the live camera feed and face-detection overlay appear.
+- Move the target left/right and up/down; verify the servos follow in the correct direction.
+- Check enrolled-user recognition and rejection of a different person.
+- Confirm approval requires a fresh owner match and operator action.
+- Confirm the approved image and timestamp are saved before APPROVED is transmitted.
+- Disconnect the database and verify a failed save does not grant approval.
+- Restart the Pi and verify the service after its local paths have been configured.
+
+**Current scope:** this repository provides the Pi-side application. Approval signaling and the Pico LED indication do not by themselves demonstrate a physical door-lock actuator. Hardware performance measurements, a completed test-results table and the Pico firmware can be added for a fuller submission.
+
+## 8. References
+
+1. Redmon, J., Divvala, S., Girshick, R., & Farhadi, A. (2016). *You Only Look Once: Unified, Real-Time Object Detection.* CVPR. [Paper](https://arxiv.org/abs/1506.02640)
+2. Zhong, Y., Deng, W., Hu, J., Zhao, D., Li, X., & Wen, D. (2021). *SFace: Sigmoid-Constrained Hypersphere Loss for Robust Face Recognition.* IEEE Transactions on Image Processing, 30, 2587–2598. [DOI](https://doi.org/10.1109/TIP.2020.3048632)
+3. Wu, W., Peng, H., & Yu, S. (2023). *YuNet: A Tiny Millisecond-level Face Detector.* Machine Intelligence Research, 20, 656–665. [DOI](https://doi.org/10.1007/s11633-023-1423-y)
+4. Elnozahy, S. S. F. A., Pari, S. C., & Liang, L. C. (2025). *Raspberry Pi-Based Face Recognition Door Lock System.* IoT, 6(2), 31. [DOI](https://doi.org/10.3390/iot6020031)
+5. Doloiu, M. D., et al. (2025). *Modeling and Control of a Pan–Tilt Servo System for Face Tracking Using Deep Learning and PID.* Engineering Proceedings, 113(1), 75. [DOI](https://doi.org/10.3390/engproc2025113075)
