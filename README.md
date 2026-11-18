@@ -5,7 +5,7 @@
 
 Real-time face tracking, identity verification, and operator-approved access logging.
 
-[Overview](#1-project-overview) · [System design](#3-system-design) · [Hardware](#4-hardware) · [Setup](#6-installation-and-operation) · [References](#8-references)
+[Overview](#overview) · [System & threads](#system-design) · [Hardware](#hardware) · [Setup](#installation) · [References](#references)
 
 </div>
 
@@ -17,19 +17,23 @@ Real-time face tracking, identity verification, and operator-approved access log
 | Main processor | Raspberry Pi 5 |
 | Servo controller | Raspberry Pi Pico via UART, 115200 baud |
 | Vision pipeline | YOLO face detection → YuNet landmarks → SFace recognition |
+| Execution | Capture, detection, recognition, HTTP and database worker threads |
+| CPU allocation | Linux schedules Pi 5 threads; no fixed thread-to-core assignment |
 | Interface | Live web dashboard with operator approval |
 | Records | Approved capture image and timestamp in MongoDB |
 
 ## Contents
 
-1. [Project overview](#1-project-overview)
-2. [Theory and related work](#2-theory-and-related-work)
-3. [System design](#3-system-design)
-4. [Hardware](#4-hardware)
-5. [Repository guide](#5-repository-guide)
-6. [Installation and operation](#6-installation-and-operation)
-7. [Verification and current scope](#7-verification-and-current-scope)
-8. [References](#8-references)
+1. [Project overview](#overview)
+2. [Theory and related work](#theory)
+3. [System design, multithreading and CPU cores](#system-design)
+4. [Hardware](#hardware)
+5. [Repository guide](#repository-guide)
+6. [Installation and operation](#installation)
+7. [Verification and current scope](#verification)
+8. [References](#references)
+
+<a name="overview"></a>
 
 ## 1. Project overview
 
@@ -46,6 +50,9 @@ The Raspberry Pi 5 processes camera images and provides a live web dashboard. On
 - Display the live camera feed and recognition status on a web dashboard.
 - Record operator-approved events before transmitting approval over UART.
 - Separate image processing on the Pi 5 from servo PWM generation on the Pico.
+- Keep camera capture, recognition and database I/O in separate execution paths so slow operations do not directly serialize the entire pipeline.
+
+<a name="theory"></a>
 
 ## 2. Theory and related work
 
@@ -69,30 +76,93 @@ The controller calculates the displacement between the face center and image cen
 
 The project integrates established techniques into a working prototype; it does not introduce a new recognition algorithm.
 
-## 3. System design
+<a name="system-design"></a>
 
-```mermaid
-flowchart TD
-    Camera[USB camera] --> Pi[Raspberry Pi 5]
-    Pi --> YOLO[YOLO face detection]
-    YOLO --> Tracking[Face-center tracking]
-    YOLO --> YuNet[YuNet landmarks and alignment]
-    YuNet --> SFace[SFace identity verification]
-    Pi --> Dashboard[Live web dashboard]
-    SFace --> Dashboard
-    Dashboard --> Approval[Operator approval]
-    Approval --> Mongo[(MongoDB: image and timestamp)]
-    Mongo --> Command[Approval command after successful save]
-    Tracking --> UART[UART: 115200 baud]
-    Command --> UART
-    UART --> Pico[Raspberry Pi Pico]
-    Pico --> Servos[Pan and tilt servo PWM]
-    Pico --> LED[Approval indication]
-```
+## 3. System design, multithreading and CPU cores
 
-**Approval sequence:** fresh owner match → operator presses Unlock → image is saved → approval command is transmitted.
+### 3.1 Execution diagram
 
-[View wiring and mechanical diagram (PDF)](Wiring%20and%20Mechanical%20Diagram.pdf)
+<p align="center">
+<img src="docs/system-threads.svg" alt="Pi 5 thread pipeline, Linux CPU scheduling, shared locks, approval worker and Pico single-loop hardware PWM" width="1080" height="1080" />
+</p>
+
+[Open the full-size execution diagram](docs/system-threads.svg) · [Wiring and mechanical diagram (PDF)](Wiring%20and%20Mechanical%20Diagram.pdf)
+
+The diagram is a static SVG with a fixed aspect ratio. It does not need an embedded Mermaid renderer to resize the page after loading.
+
+### 3.2 Why use multiple threads?
+
+Camera reads, neural-network inference, browser connections and MongoDB writes have different timing requirements. Running them sequentially in one loop would make the next camera read and tracking update wait for recognition or network I/O. The implementation separates these jobs and shares the newest available results rather than accumulating a queue of old camera frames.
+
+The application creates **three persistent vision threads**, a **main coordination thread**, an optional **web-server thread with HTTP handler threads**, and a **single-worker executor for approved captures**. Native OpenCV and PyTorch operations may also use their own internal workers. The number of Python threads is therefore not a count of CPU cores.
+
+### 3.3 Thread responsibilities and execution conditions
+
+| Execution context | Work performed | When it runs / coordination |
+| :--- | :--- | :--- |
+| Capture thread — capture_frames | Read the USB camera; replace latest_frame and increment frame_number | Started after initialization; runs until stop_event. A failed camera read requests shutdown. |
+| Detection thread — detect_faces | YOLO inference; publish smoothed tracking boxes, raw recognition boxes and the matching source frame | Only processes a frame number it has not consumed. If no new frame is available, sleeps for 2 ms. |
+| Recognition thread — recognize_faces | Handle enrollment commands; use YuNet alignment and SFace features; update identity status | Processes a new detection ID. Exactly one face is required for enrollment and matching; an accepted match must occur twice consecutively. |
+| Main thread | Snapshot state, calculate tracking angles, send UART state, handle desktop UI, encode/publish preview JPEGs and recheck Unlock requests | UART STATE is rate-limited to at most about 20 Hz; web JPEG publication to at most about 10 FPS. These are limits, not measured frame rates. |
+| Web server and request handlers | Authenticated dashboard, MJPEG stream, status/history requests and queued Unlock requests | Enabled unless --no-web is passed. HTTP uses threaded=True; browser streams wait on a Condition for a new JPEG. |
+| Unlock executor — max_workers=1 | Insert the approved JPEG and timestamp into MongoDB; send APPROVED only after a successful save | Submitted only after the main thread validates a request. No new unlock task is accepted while the previous Future is pending. |
+
+Enrollment and recognition share the recognition thread. During enrollment, the application collects 60 samples and approval is disabled. The main thread checks the unlock Future with done() before retrieving its result, so it does not wait for an unfinished database task in the display loop.
+
+### 3.4 How work uses the CPU cores
+
+**The source does not assign capture to core 0, YOLO to core 1, recognition to core 2, or the web server to core 3.** Linux schedules runnable threads across the CPUs available to the process, and a thread can move between cores. There is no sched_setaffinity call, taskset launch command or CPUAffinity entry in the inspected service file.
+
+The initialization determines the available CPU count and configures the vision libraries as follows:
+
+~~~python
+N = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+cv2.setNumThreads(N)
+torch.set_num_threads(N)
+torch.set_num_interop_threads(1)
+~~~
+
+| Setting | Meaning in this project |
+| :--- | :--- |
+| N | Number of CPUs allowed by the existing process affinity mask; fallback is the OS CPU count or 1 |
+| OpenCV threads = N | Configure OpenCV's internal parallel operations |
+| PyTorch intra-op threads = N | Configure CPU parallelism within a PyTorch operation |
+| PyTorch inter-op threads = 1 | Limit the PyTorch worker count for inter-operation parallelism |
+| Application threads | Separate capture, detection, recognition, UI, HTTP and save operations; no reserved core for any job |
+
+On a Pi 5 process permitted to use all four cores, N is normally 4. This configuration does not reserve four cores for each library or guarantee that every stage executes simultaneously. With a conventional GIL-enabled CPython build, Python bytecode is constrained by the GIL; native inference operations can have their own parallel execution. See the [Python threading documentation](https://docs.python.org/3/library/threading.html#gil-and-performance-considerations).
+
+The benefit is concurrent pipeline progress and overlap with I/O. Actual throughput and CPU load must be measured on the Pi. Both libraries are configured with N workers, and the recognition loop currently retries immediately when no new detection is available; CPU utilization should be evaluated rather than assuming one busy thread per core.
+
+### 3.5 Shared state and approval conditions
+
+- **state_lock:** protects snapshots and updates of frames, boxes, detection IDs and authorization state. Inference is performed outside the lock after copying its input.
+- **recognition_commands queue:** transfers registration/cancel commands to the recognition thread.
+- **Monitor Condition:** protects web status and the newest JPEG, and wakes waiting streams when a frame arrives or the monitor closes.
+- **Unlock request queue:** holds at most one pending browser request. Requests older than 1 second are rejected, and the main loop checks authorization again.
+- **UART lock:** serializes STATE and APPROVED writes from the main loop and unlock worker so command bytes are not interleaved.
+- **stop_event:** requests worker shutdown. Cleanup closes the web server and executor and joins the vision workers.
+
+An Unlock request is submitted only when the status is AUTHORIZED, enrollment is inactive, exactly one face is present, the authorized image and detection are each less than 1 second old, no unlock Future is pending, and at least 3 seconds have elapsed since the previous accepted request.
+
+**Approval sequence:** operator request → main-thread freshness/identity/cooldown checks → JPEG encoding → one unlock worker → MongoDB insert → APPROVED over UART. A failed initial database save prevents approval transmission.
+
+### 3.6 Pico execution and hardware PWM
+
+The inspected desktop firmware is PICO/main.py. It runs one MicroPython application loop on the main core. It does not import _thread or start an application task on core 1.
+
+| Pico execution / peripheral | Responsibility |
+| :--- | :--- |
+| Main loop (core 0) | Read UART0, assemble newline-terminated packets, validate commands and update servo pulse settings |
+| Core 1 | No application task is explicitly started in the inspected firmware |
+| Hardware PWM | Maintain 50 Hz pulses on GP2 (pan) and GP3 (tilt), independently of repeated Python pulse generation |
+| Same main loop | Update the approval LED, check LED timeout and print UART diagnostics about once per second; yield with sleep_ms(2) |
+
+The Pico accepts STATE,pan,tilt,0/1 and the legacy APPROVED command. Angles must be within 0°–180°; the configured pulse mapping is 500–2500 microseconds. STATE refreshes a 1-second LED deadline, while APPROVED alone uses 3 seconds. A silent link holds the last servo angles; the LED turns off when its deadline expires. Hardware PWM operation does not mean that a second CPU core is running the servo code.
+
+This description is based on the files in the desktop PICO/โค้ดส่ง folder and PICO/main.py. The Pi-side code is present in this repository; the inspected Pico firmware has not yet been added here.
+
+<a name="hardware"></a>
 
 ## 4. Hardware
 
@@ -105,50 +175,55 @@ flowchart TD
 | LM2596 step-down module | Voltage regulation for the hardware supply |
 | Pan-and-tilt assembly and wiring | Camera mounting and electrical connections |
 
-### Hardware overview
+### Bill of materials
 
 <p align="center">
-<img src="https://github.com/user-attachments/assets/a3fbbb00-85d5-4185-9696-8c613f89e815" alt="Project hardware reference" width="850" />
+<img src="https://github.com/user-attachments/assets/a3fbbb00-85d5-4185-9696-8c613f89e815" alt="Project bill of materials" width="953" height="418" />
 </p>
 
 ### LM2596 specification
 
 <p align="center">
-<img src="https://github.com/user-attachments/assets/68b2d266-aa94-48c4-b260-f1cc18cf9ac1" alt="LM2596 specification" width="520" />
+<img src="https://github.com/user-attachments/assets/68b2d266-aa94-48c4-b260-f1cc18cf9ac1" alt="LM2596 specification" width="642" height="686" />
 </p>
 
 ### MG996R specification
 
 <p align="center">
-<img src="https://github.com/user-attachments/assets/9b6fdc00-ed37-44d7-986c-28aab5d2af84" alt="MG996R servo specification" width="430" />
-<img src="https://github.com/user-attachments/assets/da5e8d31-a156-4c5f-ad02-05b728b73fa6" alt="MG996R supporting reference" width="430" />
+<img src="https://github.com/user-attachments/assets/9b6fdc00-ed37-44d7-986c-28aab5d2af84" alt="MG996R servo specification" width="519" height="668" />
+<img src="https://github.com/user-attachments/assets/da5e8d31-a156-4c5f-ad02-05b728b73fa6" alt="MG996R supporting reference" width="553" height="510" />
 </p>
 
 ### EMEET C950 1080P
 
 <p align="center">
-<img src="https://github.com/user-attachments/assets/71f3bf4e-c307-459a-b102-225db2a6b395" alt="EMEET C950 camera reference" width="430" />
-<img src="https://github.com/user-attachments/assets/8be02f58-b4d7-4626-a13d-01e3e7845b80" alt="EMEET C950 supporting reference" width="430" />
+<img src="https://github.com/user-attachments/assets/71f3bf4e-c307-459a-b102-225db2a6b395" alt="EMEET C950 camera reference" width="643" height="450" />
+<img src="https://github.com/user-attachments/assets/8be02f58-b4d7-4626-a13d-01e3e7845b80" alt="EMEET C950 supporting reference" width="600" height="496" />
 </p>
+
+<a name="repository-guide"></a>
 
 ## 5. Repository guide
 
 | File | Purpose |
 | :--- | :--- |
-| [yolo_face.py](yolo_face.py) | Main application, camera processing, enrollment and recognition |
+| [yolo_face.py](yolo_face.py) | Main application, threaded camera pipeline, enrollment and recognition |
 | [servo_tracking.py](servo_tracking.py) | Face-center tracking and bounded pan/tilt commands |
 | [uart_commands.py](uart_commands.py) | Serial communication, angle state and APPROVED messages |
 | [unlock_action.py](unlock_action.py) | Save the approved image before sending approval |
 | [mongodb_config.py](mongodb_config.py) | Load the MongoDB URI from the local environment |
-| [web_server.py](web_server.py) | Authenticated dashboard server |
-| [web_state.py](web_state.py) | Thread-safe monitoring state |
+| [web_server.py](web_server.py) | Authenticated dashboard server and threaded HTTP handlers |
+| [web_state.py](web_state.py) | Thread-safe monitoring state and bounded request queue |
 | [monitor.html](monitor.html) | Dashboard HTML, CSS and JavaScript |
 | [yolo-face.service](yolo-face.service) | Example systemd service for startup on boot |
+| [docs/system-threads.svg](docs/system-threads.svg) | Static execution diagram showing threads, scheduling and Pico control |
 | [model.pt](model.pt) | YOLO face-detector weights |
 | [face_detection_yunet_2023mar.onnx](face_detection_yunet_2023mar.onnx) | YuNet model |
 | [Wiring and Mechanical Diagram.pdf](Wiring%20and%20Mechanical%20Diagram.pdf) | Wiring and mechanical documentation |
 
-**Additional files required:** the SFace model, local configuration and owner enrollment data are not included in the repository. The Pico receiver firmware described as main.py must also be supplied separately.
+**Additional files required:** the SFace model, local configuration and owner enrollment data are not included in the repository. Supply the Pico receiver firmware separately.
+
+<a name="installation"></a>
 
 ## 6. Installation and operation
 
@@ -156,11 +231,11 @@ flowchart TD
 
 Create a project virtual environment and install the Python dependencies:
 
-```bash
+~~~bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install ultralytics opencv-python numpy pyserial flask pymongo
-```
+~~~
 
 The application also imports PyTorch, which is a dependency of Ultralytics. Use package builds compatible with the Pi's operating system and Python version.
 
@@ -176,9 +251,9 @@ Keep model.pt beside yolo_face.py. Create a models directory beside the script a
 
 If header UART0 is not enabled, edit /boot/firmware/config.txt and add the following under [all], then reboot:
 
-```ini
+~~~ini
 dtoverlay=uart0-pi5
-```
+~~~
 
 | Raspberry Pi 5 | Raspberry Pi Pico |
 | :--- | :--- |
@@ -186,24 +261,24 @@ dtoverlay=uart0-pi5
 | GPIO15 RX — physical pin 10 | GP0 TX — physical pin 1 |
 | GND | GND |
 
-Set both devices to **115200 baud**. Follow the wiring PDF for power and servo connections.
+Set both devices to **115200 baud**. The inspected Pico firmware uses GP2 for pan and GP3 for tilt. Follow the wiring PDF for power and servo connections.
 
 ### 6.4 Configure the database and dashboard
 
 The application reads MONGODB_URI from the environment or a neighboring .env file. Its default database and collection are face_access and unlock_events.
 
-```dotenv
+~~~dotenv
 MONGODB_URI=mongodb://localhost:27017
-```
+~~~
 
 To choose a persistent dashboard password for an interactive run, export FACE_WEB_PASSWORD in the shell before launching. If it is not provided, the application generates a password at startup. Keep private settings in local configuration.
 
 ### 6.5 Run the application
 
-```bash
+~~~bash
 source .venv/bin/activate
 python yolo_face.py --uart-port /dev/ttyAMA0 --uart-baud 115200
-```
+~~~
 
 | Option | Purpose |
 | :--- | :--- |
@@ -214,13 +289,15 @@ python yolo_face.py --uart-port /dev/ttyAMA0 --uart-baud 115200
 | --pan-direction -1 | Set horizontal tracking direction to -1 or 1 |
 | --tilt-direction 1 | Set vertical tracking direction to -1 or 1 |
 
-Open the Pi's IP address on port 5000 in a browser and authenticate with the dashboard credentials reported by the application. Complete owner enrollment before using approval.
+Open the Pi's IP address on port 5000 in a browser. The dashboard username is admin; use the configured or generated password reported by the application. Complete owner enrollment before using approval.
 
 ### 6.6 Pico and startup service
 
-The Pico receiver must interpret the UART commands, generate servo PWM and show approval status. Its firmware is not currently included in this repository.
+Install the separately supplied Pico main.py on the board with compatible MicroPython firmware. The receiver validates UART commands, updates hardware PWM and shows approval status; it does not start a second-core application thread.
 
-For automatic startup, adapt User, WorkingDirectory, EnvironmentFile and ExecStart in [yolo-face.service](yolo-face.service) to the actual Pi account and project directory before installing the unit. Configure UART, MongoDB and enrollment first.
+For automatic startup, adapt User, WorkingDirectory, EnvironmentFile and ExecStart in [yolo-face.service](yolo-face.service) to the actual Pi account and project directory before installing the unit. Configure UART, MongoDB and enrollment first. The provided unit does not set CPUAffinity.
+
+<a name="verification"></a>
 
 ## 7. Verification and current scope
 
@@ -232,9 +309,14 @@ The following checklist describes checks to perform on the assembled hardware; i
 - Confirm approval requires a fresh owner match and operator action.
 - Confirm the approved image and timestamp are saved before APPROVED is transmitted.
 - Disconnect the database and verify a failed save does not grant approval.
+- Verify tracking and preview updates continue while a database task is pending.
+- Measure per-thread/per-core CPU use and achieved frame rates on the Pi; do not infer them from thread counts.
+- Disconnect UART and check that the Pico holds its angles and the approval LED times out.
 - Restart the Pi and verify the service after its local paths have been configured.
 
-**Current scope:** this repository provides the Pi-side application. Approval signaling and the Pico LED indication do not by themselves demonstrate a physical door-lock actuator. Hardware performance measurements, a completed test-results table and the Pico firmware can be added for a fuller submission.
+**Current scope:** this repository provides the Pi-side application and execution diagram. Approval signaling and the Pico LED indication do not by themselves demonstrate a physical door-lock actuator. Hardware performance measurements, a completed test-results table and the Pico firmware can be added for a fuller submission.
+
+<a name="references"></a>
 
 ## 8. References
 
@@ -243,3 +325,5 @@ The following checklist describes checks to perform on the assembled hardware; i
 3. Wu, W., Peng, H., & Yu, S. (2023). *YuNet: A Tiny Millisecond-level Face Detector.* Machine Intelligence Research, 20, 656–665. [DOI](https://doi.org/10.1007/s11633-023-1423-y)
 4. Elnozahy, S. S. F. A., Pari, S. C., & Liang, L. C. (2025). *Raspberry Pi-Based Face Recognition Door Lock System.* IoT, 6(2), 31. [DOI](https://doi.org/10.3390/iot6020031)
 5. Doloiu, M. D., et al. (2025). *Modeling and Control of a Pan–Tilt Servo System for Face Tracking Using Deep Learning and PID.* Engineering Proceedings, 113(1), 75. [DOI](https://doi.org/10.3390/engproc2025113075)
+
+Implementation background: [Python threading and the GIL](https://docs.python.org/3/library/threading.html#gil-and-performance-considerations) · [MicroPython RP2 peripherals](https://docs.micropython.org/en/latest/rp2/quickref.html)
