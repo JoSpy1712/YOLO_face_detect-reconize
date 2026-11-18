@@ -24,7 +24,7 @@ Real-time face tracking, identity verification, and operator-approved access log
 | Servo controller | Raspberry Pi Pico via UART, 115200 baud |
 | Vision pipeline | YOLO face detection → YuNet landmarks → SFace recognition |
 | Execution | Capture, detection, recognition, HTTP and database worker threads |
-| CPU allocation | Linux schedules Pi 5 threads; no fixed thread-to-core assignment |
+| CPU use | Linux chooses a CPU core for each thread; jobs are not tied to fixed cores |
 | Interface | Live web dashboard with operator approval |
 | Records | Approved capture image and timestamp in MongoDB |
 
@@ -102,43 +102,38 @@ Camera reads, neural-network inference, browser connections and MongoDB writes h
 
 The application creates **three persistent vision threads**, a **main coordination thread**, an optional **web-server thread with HTTP handler threads**, and a **single-worker executor for approved captures**. Native OpenCV and PyTorch operations may also use their own internal workers. The number of Python threads is therefore not a count of CPU cores.
 
-### 3.3 Thread responsibilities and execution conditions
+### 3.3 What each thread does
 
-| Execution context | Work performed | When it runs / coordination |
+A thread is a separate flow of work inside the program.
+
+| Thread | Main job | Key condition |
 | :--- | :--- | :--- |
-| Capture thread — capture_frames | Read the USB camera; replace latest_frame and increment frame_number | Started after initialization; runs until stop_event. A failed camera read requests shutdown. |
-| Detection thread — detect_faces | YOLO inference; publish smoothed tracking boxes, raw recognition boxes and the matching source frame | Only processes a frame number it has not consumed. If no new frame is available, sleeps for 2 ms. |
-| Recognition thread — recognize_faces | Handle enrollment commands; use YuNet alignment and SFace features; update identity status | Processes a new detection ID. Exactly one face is required for enrollment and matching; an accepted match must occur twice consecutively. |
-| Main thread | Snapshot state, calculate tracking angles, send UART state, handle desktop UI, encode/publish preview JPEGs and recheck Unlock requests | UART STATE is rate-limited to at most about 20 Hz; web JPEG publication to at most about 10 FPS. These are limits, not measured frame rates. |
-| Web server and request handlers | Authenticated dashboard, MJPEG stream, status/history requests and queued Unlock requests | Enabled unless --no-web is passed. HTTP uses threaded=True; browser streams wait on a Condition for a new JPEG. |
-| Unlock executor — max_workers=1 | Insert the approved JPEG and timestamp into MongoDB; send APPROVED only after a successful save | Submitted only after the main thread validates a request. No new unlock task is accepted while the previous Future is pending. |
+| Capture | Read the camera and keep the newest image | Runs continuously |
+| Detection | Find faces with YOLO | Process each new image once |
+| Recognition | Register the owner or check their face | Requires one face; accept a match twice in a row |
+| Main | Track the face, send servo angles and update the display | Send angles at most about 20 times/s; web images at most about 10 times/s |
+| Web | Show live images and receive Unlock requests | Runs unless --no-web is used |
+| Unlock worker | Save the image to MongoDB, then send APPROVED | One save task at a time; no approval if saving fails |
 
-Enrollment and recognition share the recognition thread. During enrollment, the application collects 60 samples and approval is disabled. The main thread checks the unlock Future with done() before retrieving its result, so it does not wait for an unfinished database task in the display loop.
+The program checks the save result later, so the main loop does not wait for an unfinished database task. During registration, it collects 60 face images and disables Unlock. The rates above are code limits, not measured performance.
 
-### 3.4 How work uses the CPU cores
+<a name="cpu"></a>
 
-**The source does not assign capture to core 0, YOLO to core 1, recognition to core 2, or the web server to core 3.** Linux schedules runnable threads across the CPUs available to the process, and a thread can move between cores. There is no sched_setaffinity call, taskset launch command or CPUAffinity entry in the inspected service file.
+### 3.4 CPU and thread settings
 
-The initialization determines the available CPU count and configures the vision libraries as follows:
+**The program uses multiple threads. Linux decides which CPU core runs each thread.** The code does not give each job its own fixed core.
 
-~~~python
-N = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
-cv2.setNumThreads(N)
-torch.set_num_threads(N)
-torch.set_num_interop_threads(1)
-~~~
+**N means the number of CPU cores the program is allowed to use.** If all four Pi 5 cores are available, N = 4. The settings below control extra threads inside OpenCV and PyTorch:
 
-| Setting | Meaning in this project |
-| :--- | :--- |
-| N | Number of CPUs allowed by the existing process affinity mask; fallback is the OS CPU count or 1 |
-| OpenCV threads = N | Configure OpenCV's internal parallel operations |
-| PyTorch intra-op threads = N | Configure CPU parallelism within a PyTorch operation |
-| PyTorch inter-op threads = 1 | Limit the PyTorch worker count for inter-operation parallelism |
-| Application threads | Separate capture, detection, recognition, UI, HTTP and save operations; no reserved core for any job |
+| Setting in the code | Value when N = 4 | Simple meaning |
+| :--- | :--- | :--- |
+| cv2.setNumThreads(N) | 4 threads | Let OpenCV use 4 threads for image operations that support it |
+| torch.set_num_threads(N) | 4 threads | Let PyTorch use 4 threads to help calculate one operation |
+| torch.set_num_interop_threads(1) | 1 thread | Use 1 thread for work between PyTorch operations |
 
-On a Pi 5 process permitted to use all four cores, N is normally 4. This configuration does not reserve four cores for each library or guarantee that every stage executes simultaneously. With a conventional GIL-enabled CPython build, Python bytecode is constrained by the GIL; native inference operations can have their own parallel execution. See the [Python threading documentation](https://docs.python.org/3/library/threading.html#gil-and-performance-considerations).
+**The numbers 4 and 1 are thread counts, not core numbers.** The last setting does not make the whole program single-threaded. Camera, detection, recognition, web and save threads still exist separately.
 
-The benefit is concurrent pipeline progress and overlap with I/O. Actual throughput and CPU load must be measured on the Pi. Both libraries are configured with N workers. The recognition loop waits up to 10 ms for a registration/cancel command on each iteration before checking for a new detection; CPU utilization should be measured rather than assuming one busy thread per core.
+Multiple threads let different jobs make progress without waiting for the whole pipeline. They do not guarantee that every job runs at the same instant or on a different core. Actual speed must be measured on the Pi.
 
 ### 3.5 Shared state and approval conditions
 
