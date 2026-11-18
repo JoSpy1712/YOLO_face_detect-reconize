@@ -166,11 +166,11 @@ The application also imports PyTorch, which is a dependency of Ultralytics. Use 
 
 ### 6.2 Prepare the models
 
-Keep the following model files beside yolo_face.py:
+Keep model.pt beside yolo_face.py. Create a models directory beside the script and place both ONNX models inside it:
 
 - model.pt — included YOLO face-detector weights.
-- face_detection_yunet_2023mar.onnx — included YuNet model.
-- face_recognition_sface_2021dec.onnx — download separately from [OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface).
+- models/face_detection_yunet_2023mar.onnx — move the included YuNet model from the repository root into models/.
+- models/face_recognition_sface_2021dec.onnx — download separately from [OpenCV Zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface).
 
 ### 6.3 Configure UART
 
