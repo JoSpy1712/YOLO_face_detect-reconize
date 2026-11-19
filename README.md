@@ -150,7 +150,7 @@ An Unlock request is submitted only when the status is AUTHORIZED, enrollment is
 
 ### 3.6 Pico execution and hardware PWM
 
-The inspected desktop firmware is PICO/main.py. It runs one MicroPython application loop on the main core. It does not import _thread or start an application task on core 1.
+The Pico firmware is included as [main.py](main.py). It runs one MicroPython application loop on the main core. It does not import _thread or start an application task on core 1.
 
 | Pico execution / peripheral | Responsibility |
 | :--- | :--- |
@@ -161,7 +161,7 @@ The inspected desktop firmware is PICO/main.py. It runs one MicroPython applicat
 
 The Pico accepts STATE,pan,tilt,0/1 and the legacy APPROVED command. Angles must be within 0°–180°; the configured pulse mapping is 500–2500 microseconds. STATE refreshes a 1-second LED deadline, while APPROVED alone uses 3 seconds. A silent link holds the last servo angles; the LED turns off when its deadline expires. Hardware PWM operation does not mean that a second CPU core is running the servo code.
 
-This description is based on the files in the desktop PICO/โค้ดส่ง folder and PICO/main.py. The Pi-side code is present in this repository; the inspected Pico firmware has not yet been added here.
+The repository includes both the Pi 5 application, [yolo_face.py](yolo_face.py), and the Pico receiver, [main.py](main.py).
 
 <a name="hardware"></a>
 
@@ -208,7 +208,8 @@ This description is based on the files in the desktop PICO/โค้ดส่ง
 
 | File | Purpose |
 | :--- | :--- |
-| [yolo_face.py](yolo_face.py) | Main application, threaded camera pipeline, enrollment and recognition |
+| [yolo_face.py](yolo_face.py) | Pi 5 application: threaded camera pipeline, enrollment and recognition |
+| [main.py](main.py) | Pico MicroPython firmware: UART receiver, pan/tilt PWM and approval LED |
 | [servo_tracking.py](servo_tracking.py) | Face-center tracking and bounded pan/tilt commands |
 | [uart_commands.py](uart_commands.py) | Serial communication, angle state and APPROVED messages |
 | [unlock_action.py](unlock_action.py) | Save the approved image before sending approval |
@@ -222,7 +223,7 @@ This description is based on the files in the desktop PICO/โค้ดส่ง
 | [face_detection_yunet_2023mar.onnx](face_detection_yunet_2023mar.onnx) | YuNet model |
 | [Wiring and Mechanical Diagram.pdf](Wiring%20and%20Mechanical%20Diagram.pdf) | Wiring and mechanical documentation |
 
-**Additional files required:** the SFace model, local configuration and owner enrollment data are not included in the repository. Supply the Pico receiver firmware separately.
+**Additional files required:** the SFace model, local configuration and owner enrollment data are not included in the repository.
 
 <a name="installation"></a>
 
@@ -366,7 +367,7 @@ Approval captures are not added to owner_faces and do not automatically update t
 
 ### 6.7 Pico and startup service
 
-Install the separately supplied Pico main.py on the board with compatible MicroPython firmware. The receiver validates UART commands, updates hardware PWM and shows approval status; it does not start a second-core application thread.
+Copy the included [main.py](main.py) to the Pico as main.py using Thonny and compatible MicroPython firmware. This file runs on the Pico; run yolo_face.py on the Pi 5. The receiver validates UART commands, updates hardware PWM and shows approval status; it does not start a second-core application thread.
 
 For automatic startup, adapt User, WorkingDirectory, EnvironmentFile and ExecStart in [yolo-face.service](yolo-face.service) to the actual Pi account and project directory before installing the unit. Configure UART, MongoDB and enrollment first. The provided unit does not set CPUAffinity.
 
@@ -387,7 +388,7 @@ The following checklist describes checks to perform on the assembled hardware; i
 - Disconnect UART and check that the Pico holds its angles and the approval LED times out.
 - Restart the Pi and verify the service after its local paths have been configured.
 
-**Current scope:** this repository provides the Pi-side application and execution diagram. Approval signaling and the Pico LED indication do not by themselves demonstrate a physical door-lock actuator. Hardware performance measurements, a completed test-results table and the Pico firmware can be added for a fuller submission.
+**Current scope:** this repository provides the Pi 5 application, Pico firmware and execution diagram. Approval signaling and the Pico LED indication do not by themselves demonstrate a physical door-lock actuator. Hardware performance measurements and a completed test-results table can be added for a fuller submission.
 
 <a name="references"></a>
 
