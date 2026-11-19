@@ -36,6 +36,7 @@ Real-time face tracking, identity verification, and operator-approved access log
 4. [Hardware](#hardware)
 5. [Repository guide](#repository-guide)
 6. [Installation and operation](#installation) — [face enrollment](#face-enrollment)
+7. [Demo videos](#demo-videos)
 
 <a name="overview"></a>
 
@@ -353,3 +354,13 @@ Approval captures are not added to owner_faces and do not automatically update t
 Copy the included [main.py](main.py) to the Pico as main.py using Thonny and compatible MicroPython firmware. This file runs on the Pico; run yolo_face.py on the Pi 5. The receiver validates UART commands, updates hardware PWM and shows approval status.
 
 For automatic startup, adapt User, WorkingDirectory, EnvironmentFile and ExecStart in [yolo-face.service](yolo-face.service) to the actual Pi account and project directory before installing the unit. Configure UART, MongoDB and enrollment first.
+
+<a name="demo-videos"></a>
+
+## 7. Demo videos
+
+Videos recorded during prototype testing. Click a link to open the video.
+
+- [Watch demo 1](demo-01.mp4)
+- [Watch demo 2](demo-02.mp4)
+- [Watch demo 3](demo-03.mp4)
