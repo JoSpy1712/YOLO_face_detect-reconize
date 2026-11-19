@@ -5,7 +5,7 @@
 
 Real-time face tracking, identity verification, and operator-approved access logging.
 
-[Overview](#overview) · [System & threads](#system-design) · [Hardware](#hardware) · [Setup](#installation) · [References](#references)
+[Overview](#overview) · [System & threads](#system-design) · [Hardware](#hardware) · [Setup](#installation)
 
 </div>
 
@@ -36,8 +36,6 @@ Real-time face tracking, identity verification, and operator-approved access log
 4. [Hardware](#hardware)
 5. [Repository guide](#repository-guide)
 6. [Installation and operation](#installation) — [face enrollment](#face-enrollment)
-7. [Verification and current scope](#verification)
-8. [References](#references)
 
 <a name="overview"></a>
 
@@ -368,34 +366,3 @@ Approval captures are not added to owner_faces and do not automatically update t
 Copy the included [main.py](main.py) to the Pico as main.py using Thonny and compatible MicroPython firmware. This file runs on the Pico; run yolo_face.py on the Pi 5. The receiver validates UART commands, updates hardware PWM and shows approval status; it does not start a second-core application thread.
 
 For automatic startup, adapt User, WorkingDirectory, EnvironmentFile and ExecStart in [yolo-face.service](yolo-face.service) to the actual Pi account and project directory before installing the unit. Configure UART, MongoDB and enrollment first. The provided unit does not set CPUAffinity.
-
-<a name="verification"></a>
-
-## 7. Verification and current scope
-
-The following checklist describes checks to perform on the assembled hardware; it is not a report of measured test results.
-
-- Confirm the live camera feed and face-detection overlay appear.
-- Move the target left/right and up/down; verify the servos follow in the correct direction.
-- Check enrolled-user recognition and rejection of a different person.
-- Confirm approval requires a fresh owner match and operator action.
-- Confirm the approved image and timestamp are saved before APPROVED is transmitted.
-- Disconnect the database and verify a failed save does not grant approval.
-- Verify tracking and preview updates continue while a database task is pending.
-- Measure per-thread/per-core CPU use and achieved frame rates on the Pi; do not infer them from thread counts.
-- Disconnect UART and check that the Pico holds its angles and the approval LED times out.
-- Restart the Pi and verify the service after its local paths have been configured.
-
-**Current scope:** this repository provides the Pi 5 application, Pico firmware and execution diagram. Approval signaling and the Pico LED indication do not by themselves demonstrate a physical door-lock actuator. Hardware performance measurements and a completed test-results table can be added for a fuller submission.
-
-<a name="references"></a>
-
-## 8. References
-
-1. Redmon, J., Divvala, S., Girshick, R., & Farhadi, A. (2016). *You Only Look Once: Unified, Real-Time Object Detection.* CVPR. [Paper](https://arxiv.org/abs/1506.02640)
-2. Zhong, Y., Deng, W., Hu, J., Zhao, D., Li, X., & Wen, D. (2021). *SFace: Sigmoid-Constrained Hypersphere Loss for Robust Face Recognition.* IEEE Transactions on Image Processing, 30, 2587–2598. [DOI](https://doi.org/10.1109/TIP.2020.3048632)
-3. Wu, W., Peng, H., & Yu, S. (2023). *YuNet: A Tiny Millisecond-level Face Detector.* Machine Intelligence Research, 20, 656–665. [DOI](https://doi.org/10.1007/s11633-023-1423-y)
-4. Elnozahy, S. S. F. A., Pari, S. C., & Liang, L. C. (2025). *Raspberry Pi-Based Face Recognition Door Lock System.* IoT, 6(2), 31. [DOI](https://doi.org/10.3390/iot6020031)
-5. Doloiu, M. D., et al. (2025). *Modeling and Control of a Pan–Tilt Servo System for Face Tracking Using Deep Learning and PID.* Engineering Proceedings, 113(1), 75. [DOI](https://doi.org/10.3390/engproc2025113075)
-
-Implementation background: [Python threading and the GIL](https://docs.python.org/3/library/threading.html#gil-and-performance-considerations) · [MicroPython RP2 peripherals](https://docs.micropython.org/en/latest/rp2/quickref.html)
