@@ -157,7 +157,6 @@ The Pico firmware is included as [main.py](main.py). It runs one MicroPython app
 | Main loop (core 0) | Read UART0, assemble newline-terminated packets, validate commands and update servo pulse settings |
 | Core 1 | No application task is explicitly started in the inspected firmware |
 | Hardware PWM | Maintain 50 Hz pulses on GP2 (pan) and GP3 (tilt), independently of repeated Python pulse generation |
-| Same main loop | Update the approval LED, check LED timeout and print UART diagnostics about once per second; yield with sleep_ms(2) |
 
 The Pico accepts STATE,pan,tilt,0/1 and the legacy APPROVED command. Angles must be within 0°–180°; the configured pulse mapping is 500–2500 microseconds. STATE refreshes a 1-second LED deadline, while APPROVED alone uses 3 seconds. A silent link holds the last servo angles; the LED turns off when its deadline expires. Hardware PWM operation does not mean that a second CPU core is running the servo code.
 
@@ -174,7 +173,6 @@ The repository includes both the Pi 5 application, [yolo_face.py](yolo_face.py),
 | EMEET C950 1080P camera | Camera input |
 | MG996R servos | Pan-and-tilt movement |
 | LM2596 step-down module | Voltage regulation for the hardware supply |
-| Pan-and-tilt assembly and wiring | Camera mounting and electrical connections |
 
 ### Bill of materials
 
