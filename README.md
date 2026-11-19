@@ -133,19 +133,6 @@ The program checks the save result later, so the main loop does not wait for an 
 
 Multiple threads let different jobs make progress without waiting for the whole pipeline. They do not guarantee that every job runs at the same instant or on a different core. Actual speed must be measured on the Pi.
 
-### 3.5 Shared state and approval conditions
-
-- **state_lock:** protects snapshots and updates of frames, boxes, detection IDs and authorization state. Inference is performed outside the lock after copying its input.
-- **recognition_commands queue:** transfers registration/cancel commands to the recognition thread.
-- **Monitor Condition:** protects web status and the newest JPEG, and wakes waiting streams when a frame arrives or the monitor closes.
-- **Unlock request queue:** holds at most one pending browser request. Requests older than 1 second are rejected, and the main loop checks authorization again.
-- **UART lock:** serializes STATE and APPROVED writes from the main loop and unlock worker so command bytes are not interleaved.
-- **stop_event:** requests worker shutdown. Cleanup closes the web server and executor and joins the vision workers.
-
-An Unlock request is submitted only when the status is AUTHORIZED, enrollment is inactive, exactly one face is present, the authorized image and detection are each less than 1 second old, no unlock Future is pending, and at least 3 seconds have elapsed since the previous accepted request.
-
-**Approval sequence:** operator request → main-thread freshness/identity/cooldown checks → JPEG encoding → one unlock worker → MongoDB insert → APPROVED over UART. A failed initial database save prevents approval transmission.
-
 ### 3.6 Pico execution and hardware PWM
 
 The Pico firmware is included as [main.py](main.py). It runs one MicroPython application loop on the main core. It does not import _thread or start an application task on core 1.
