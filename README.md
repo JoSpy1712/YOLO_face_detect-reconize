@@ -133,7 +133,7 @@ The program checks the save result later, so the main loop does not wait for an 
 
 Multiple threads let different jobs make progress without waiting for the whole pipeline. They do not guarantee that every job runs at the same instant or on a different core. Actual speed must be measured on the Pi.
 
-### 3.6 Pico execution and hardware PWM
+### 3.5 Pico execution and hardware PWM
 
 The Pico firmware is included as [main.py](main.py). It runs one MicroPython application loop on the main core. It does not import _thread or start an application task on core 1.
 
